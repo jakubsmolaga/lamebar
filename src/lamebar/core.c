@@ -91,7 +91,15 @@ PixelBuf next_frame(Arena *arena)
 	u32 h = base_h + padding * 2;
 	Pixel *data = arena_push_arr(arena, Pixel, w * h);
 	PixelBuf pixels = {.w = w, .h = h, .data = data};
-	Pixel bg = {.r = 0, .g = 0, .b = 0, .a = 255}; // TODO: make this configurable/nicer
+	Pixel bg = {.r = 0x08, .g = 0x08, .b = 0x08, .a = 0xff}; // TODO: make this configurable/nicer
+	Pixel border = {.r = 0xbd, .g = 0xbd, .b = 0xbd, .a = 0xff}; // TODO: make this configurable/nicer
+	for (u32 i = 0; i < w * h; i++) {
+		pixels.data[i] = bg;
+	}
+	for (u32 col = 0; col < w; col++) pixels.data[0 * w + col] = border;
+	for (u32 row = 0; row < w; row++) pixels.data[row * w + 0] = border;
+	for (u32 col = 0; col < w; col++) pixels.data[(h - 1) * w + col] = border;
+	for (u32 row = 0; row < w; row++) pixels.data[row * w + (w - 1)] = border;
 	u32 current_x = padding;
 	u32 current_y = padding;
 	for (u32 i = 0; i < glyph_ids_len; i++) {
