@@ -18,6 +18,17 @@ get_time_and_date(void)
 	return time_and_date;
 }
 
+static u32
+get_battery_percent(void)
+{
+	FILE *fp = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+	if (!fp) return 0;
+	u32 capacity = 0;
+	fscanf(fp, "%u", &capacity);
+	fclose(fp);
+	return capacity;
+}
+
 static GlyphId
 digit_to_glyph_id(u32 digit)
 {
@@ -40,7 +51,7 @@ digit_to_glyph_id(u32 digit)
 }
 
 static u32
-get_glyphs(TimeAndDate td, GlyphId *out)
+get_glyphs(TimeAndDate td, u32 battery_percent, GlyphId *out)
 {
 	u32 len = 0;
 	out[len++] = digit_to_glyph_id((td.year / 1000) % 10);
@@ -61,6 +72,21 @@ get_glyphs(TimeAndDate td, GlyphId *out)
 	out[len++] = GLYPH_ID_COLON;
 	out[len++] = digit_to_glyph_id((td.minute / 10) % 10);
 	out[len++] = digit_to_glyph_id((td.minute / 1 ) % 10);
+	out[len++] = GLYPH_ID_SPACE;
+	out[len++] = GLYPH_ID_PIPE;
+	out[len++] = GLYPH_ID_SPACE;
+	// TODO: this probably should be configurable
+	if (battery_percent > 50) {
+		out[len++] = GLYPH_ID_BATTERY_FULL;
+	} else if (battery_percent > 20) {
+		out[len++] = GLYPH_ID_BATTERY_HALF;
+	} else {
+		out[len++] = GLYPH_ID_BATTERY_LOW;
+	}
+	out[len++] = GLYPH_ID_SPACE;
+	out[len++] = digit_to_glyph_id((battery_percent / 10) % 10);
+	out[len++] = digit_to_glyph_id((battery_percent / 1 ) % 10);
+	out[len++] = GLYPH_ID_PERCENT;
 	return len;
 }
 
@@ -82,8 +108,9 @@ measure_glyphs(GlyphId *glyph_ids, u32 len, u32 *out_w, u32 *out_h)
 PixelBuf next_frame(Arena *arena)
 {
 	TimeAndDate td = get_time_and_date();
+	u32 battery_percent = get_battery_percent();
 	static GlyphId glyph_ids[1024];
-	u32 glyph_ids_len = get_glyphs(td, glyph_ids);
+	u32 glyph_ids_len = get_glyphs(td, battery_percent, glyph_ids);
 	u32 base_w, base_h;
 	measure_glyphs(glyph_ids, glyph_ids_len, &base_w, &base_h);
 	u32 padding = 2;
