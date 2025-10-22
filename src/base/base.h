@@ -63,3 +63,21 @@ pixelbuf_copy(PixelBuf dst, const PixelBuf src, u32 x, u32 y, u32 scale)
 		}
 	}
 }
+
+static void
+pixelbuf_blend(PixelBuf dst, const PixelBuf src, u32 x, u32 y)
+{
+	for (u32 row = 0; row < src.h; row++) {
+		for (u32 col = 0; col < src.w; col++) {
+			Pixel sp = src.data[row * src.w + col];
+			Pixel *dp = &dst.data[(y + row) * dst.w + (x + col)];
+			u8 sa = sp.a;
+			u8 da = dp->a;
+			u32 inv_sa = 255 - sa;
+			dp->r = (sp.r * sa + dp->r * inv_sa) / 255;
+			dp->g = (sp.g * sa + dp->g * inv_sa) / 255;
+			dp->b = (sp.b * sa + dp->b * inv_sa) / 255;
+			dp->a = sa + ((da * inv_sa) / 255);
+		}
+	}
+}

@@ -104,7 +104,7 @@ PixelBuf next_frame(Arena *arena)
 	u32 current_y = padding;
 	for (u32 i = 0; i < glyph_ids_len; i++) {
 		GlyphId id = glyph_ids[i];
-		pixelbuf_copy(pixels, glyphs[id], current_x, current_y, 1);
+		pixelbuf_blend(pixels, glyphs[id], current_x, current_y);
 		current_x += glyphs[id].w + 1;
 	}
 	return pixels;
