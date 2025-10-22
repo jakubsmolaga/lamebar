@@ -13,8 +13,8 @@ static void *arena_push_raw(Arena *arena, u64 size, u64 align);
 static void *arena_pos(Arena *arena);
 static char *arena_push_str(Arena *arena, const char *str);
 
-#define arena_push(a, t) arena_push_raw(a, sizeof(t), alignof(t))
-#define arena_push_arr(a, t, count) arena_push_raw(a, sizeof(t) * count, alignof(t))
+#define arena_push(a, t) ((t*)arena_push_raw(a, sizeof(t), alignof(t)))
+#define arena_push_arr(a, t, count) ((t*)arena_push_raw(a, sizeof(t) * count, alignof(t)))
 
 /******************************************************************************/
 /*                           inline implementations                           */
