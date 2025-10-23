@@ -35,6 +35,7 @@ digit_to_glyph_id(u32 digit)
 	// NOTE: this statement is probably gonna be optimzed into
 	// just an addition, but writing it out as a switch statement
 	// makes the intention more clear
+	// UPDATE: godbolt seems to agree with me
 	switch (digit) {
 	case 0: return GLYPH_ID_DIGIT_0;
 	case 1: return GLYPH_ID_DIGIT_1;
@@ -105,35 +106,57 @@ measure_glyphs(GlyphId *glyph_ids, u32 len, u32 *out_w, u32 *out_h)
 	*out_h = h;
 }
 
-PixelBuf next_frame(Arena *arena)
+static void
+draw_background(PixelBuf pixels)
+{
+	Pixel bg = { .r = 0x08, .g = 0x08, .b = 0x08, .a = 0xff };
+	for (u32 i = 0; i < pixels.w * pixels.h; i++)
+		pixels.data[i] = bg;
+}
+
+static void
+draw_border(PixelBuf p)
+{
+	u32 w = p.w, h = p.h;
+	Pixel border = { .r = 0xbd, .g = 0xbd, .b = 0xbd, .a = 0xff };
+	for (u32 c = 0; c < w; c++) p.data[(0    ) * w + (c    )] = border;
+	for (u32 c = 0; c < w; c++) p.data[(h - 1) * w + (c    )] = border;
+	for (u32 r = 0; r < h; r++) p.data[(r    ) * w + (0    )] = border;
+	for (u32 r = 0; r < h; r++) p.data[(r    ) * w + (w - 1)] = border;
+}
+
+static void
+draw_glyphs(PixelBuf pixels, GlyphId *glyph_ids, u32 len, u32 x, u32 y)
+{
+	for (u32 i = 0; i < len; i++) {
+		GlyphId id = glyph_ids[i];
+		pixelbuf_blend(pixels, glyphs[id], x, y);
+		x += glyphs[id].w + 1;
+	}
+}
+
+PixelBuf
+next_frame(Arena *arena)
 {
 	TimeAndDate td = get_time_and_date();
 	u32 battery_percent = get_battery_percent();
+
 	static GlyphId glyph_ids[1024];
 	u32 glyph_ids_len = get_glyphs(td, battery_percent, glyph_ids);
+
 	u32 base_w, base_h;
 	measure_glyphs(glyph_ids, glyph_ids_len, &base_w, &base_h);
-	u32 padding = 2;
-	u32 w = base_w + padding * 2;
-	u32 h = base_h + padding * 2;
+
+	u32 pad = 2;
+	u32 w = base_w + pad * 2;
+	u32 h = base_h + pad * 2;
 	Pixel *data = arena_push_arr(arena, Pixel, w * h);
-	PixelBuf pixels = {.w = w, .h = h, .data = data};
-	Pixel bg = {.r = 0x08, .g = 0x08, .b = 0x08, .a = 0xff}; // TODO: make this configurable/nicer
-	Pixel border = {.r = 0xbd, .g = 0xbd, .b = 0xbd, .a = 0xff}; // TODO: make this configurable/nicer
-	for (u32 i = 0; i < w * h; i++) {
-		pixels.data[i] = bg;
-	}
-	for (u32 col = 0; col < w; col++) pixels.data[0 * w + col] = border;
-	for (u32 row = 0; row < w; row++) pixels.data[row * w + 0] = border;
-	for (u32 col = 0; col < w; col++) pixels.data[(h - 1) * w + col] = border;
-	for (u32 row = 0; row < w; row++) pixels.data[row * w + (w - 1)] = border;
-	u32 current_x = padding;
-	u32 current_y = padding;
-	for (u32 i = 0; i < glyph_ids_len; i++) {
-		GlyphId id = glyph_ids[i];
-		pixelbuf_blend(pixels, glyphs[id], current_x, current_y);
-		current_x += glyphs[id].w + 1;
-	}
+	PixelBuf pixels = { .w = w, .h = h, .data = data };
+
+	draw_background(pixels);
+	draw_border(pixels);
+	draw_glyphs(pixels, glyph_ids, glyph_ids_len, pad, pad);
+
 	return pixels;
 }
 
