@@ -443,7 +443,12 @@ void wl_init(u32 scale) {
 	// wl_viewport_set_destination(viewport, wl.framebuf.w * scale, wl.framebuf.h * scale);
 }
 
-void wl_hide(void) { printf("wl_hide\n"); }
+void wl_hide(void) {
+	memset(wl.framebuf.data, 0, wl.framebuf.w * wl.framebuf.h * sizeof(Pixel));
+	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
+	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
+	wl_surface_commit(wl.surface);
+}
 
 void
 wl_show(PixelBuf pixels)
