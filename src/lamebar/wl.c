@@ -368,7 +368,7 @@ void wl_init(u32 scale) {
 	wl_connect();
 	u32 registry = wl_display_get_registry();
 	wl_fill_rcvbuf();
-	u32 compositor = 0, layer_shell = 0, shm = 0, viewporter = 0;
+	u32 compositor = 0, layer_shell = 0, shm = 0;
 	char *iface; // DEBUG
 	while (wl_has_data()) {
 		WL_Hdr hdr = wl_recv_hdr();
@@ -388,15 +388,12 @@ void wl_init(u32 scale) {
 			layer_shell = wl_registry_bind(registry, name, iface, version);
 		else if (strcmp(iface, "wl_shm") == 0)
 			shm = wl_registry_bind(registry, name, iface, version);
-		else if (strcmp(iface, "wp_viewporter") == 0)
-			viewporter = wl_registry_bind(registry, name, iface, version);
 	}
 	printf("registry=%d\n", registry);
 	printf("compositor=%d\n", compositor);
 	printf("zwlr_layer_shell_v1=%d\n", layer_shell);
 	printf("shm=%d\n", shm);
-	printf("viewporter=%d\n", viewporter);
-	if (compositor == 0 || layer_shell == 0 || shm == 0 || viewporter == 0) {
+	if (compositor == 0 || layer_shell == 0 || shm == 0) {
 		fprintf(stderr, "one of the required interfaces is missing\n");
 		exit(1);
 	}
@@ -438,9 +435,6 @@ void wl_init(u32 scale) {
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
 	wl_surface_commit(wl.surface);
 	wl_drain_events();
-	// u32 viewport = wl_viewporter_get_viewport(viewporter, wl.surface);
-	// wl_viewport_set_source(viewport, 0, 0, wl.framebuf.w, wl.framebuf.h);
-	// wl_viewport_set_destination(viewport, wl.framebuf.w * scale, wl.framebuf.h * scale);
 }
 
 void wl_hide(void) {
