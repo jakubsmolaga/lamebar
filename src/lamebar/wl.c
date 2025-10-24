@@ -302,18 +302,6 @@ wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
 	wl_msg_end(hdr, 0);
 }
 
-__attribute__((deprecated("use wl_surface_damage_buffer instead")))
-static void
-wl_surface_damage(u32 self, u32 x, u32 y, u32 w, u32 h)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 2);
-	wl_msg_push_u32(hdr, x);
-	wl_msg_push_u32(hdr, y);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-	wl_msg_end(hdr, 0);
-}
-
 static void
 wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
 {
@@ -369,19 +357,15 @@ void wl_init(u32 scale) {
 	u32 registry = wl_display_get_registry();
 	wl_fill_rcvbuf();
 	u32 compositor = 0, layer_shell = 0, shm = 0;
-	char *iface; // DEBUG
 	while (wl_has_data()) {
 		WL_Hdr hdr = wl_recv_hdr();
-		printf("got header\n");
 		if (hdr.obj != registry || hdr.opcode != 0) {
 			wl_recv(hdr.size - sizeof(hdr)); // skip
 			continue;
 		}
 		u32 name = wl_recv_u32();
-		// char *iface = wl_recv_str();
-		iface = wl_recv_str(); // DEBUG
+		char *iface = wl_recv_str();
 		u32 version = wl_recv_u32();
-		printf("intarface: %s\n", iface);
 		if (strcmp(iface, "wl_compositor") == 0)
 			compositor = wl_registry_bind(registry, name, iface, version);
 		else if (strcmp(iface, "zwlr_layer_shell_v1") == 0)
@@ -389,10 +373,6 @@ void wl_init(u32 scale) {
 		else if (strcmp(iface, "wl_shm") == 0)
 			shm = wl_registry_bind(registry, name, iface, version);
 	}
-	printf("registry=%d\n", registry);
-	printf("compositor=%d\n", compositor);
-	printf("zwlr_layer_shell_v1=%d\n", layer_shell);
-	printf("shm=%d\n", shm);
 	if (compositor == 0 || layer_shell == 0 || shm == 0) {
 		fprintf(stderr, "one of the required interfaces is missing\n");
 		exit(1);
@@ -416,12 +396,10 @@ void wl_init(u32 scale) {
 		serial = wl_recv_u32();
 		u32 width = wl_recv_u32();
 		u32 height = wl_recv_u32();
-		printf("received configure (%d/%d)\n", width, height);
 		break;
 	}
 	zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
-	// 
 	int framebuf_fd;
 	wl.framebuf.w = width * scale;
 	wl.framebuf.h = height * scale;
@@ -454,5 +432,4 @@ wl_show(PixelBuf pixels)
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
 	wl_surface_commit(wl.surface);
-	printf("wl_show\n");
 }
