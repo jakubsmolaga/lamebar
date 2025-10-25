@@ -39,6 +39,7 @@ void ipc_send(IPC_Cmd cmd) {
 IPC_Cmd ipc_recv(void) { 
 	char c;
 	int ret = read(ipc_pipe_fd, &c, 1);
+	if (ret != 1) return IPC_CMD_NONE;
 	switch (c) {
 	case '1': return IPC_CMD_SHOW;
 	case '0': return IPC_CMD_HIDE;

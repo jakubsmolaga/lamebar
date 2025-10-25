@@ -1,7 +1,5 @@
 #define _GNU_SOURCE
 #include "wl.h"
-#include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/un.h>
@@ -199,7 +197,7 @@ wl_drain_events(void)
 		u32 obj_id = wl_recv_u32();
 		u32 errcode = wl_recv_u32();
 		char *msg = wl_recv_str();
-		log_crash("wayland error (%d): %s", errcode, msg);
+		log_crash("wayland error (%d) (obj=%d): %s", errcode, obj_id, msg);
 	}
 }
 
@@ -359,36 +357,6 @@ wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
 	wl_msg_end(hdr, 0);
 }
 
-static u32
-wl_viewporter_get_viewport(u32 self, u32 surface)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
-	wl_msg_push_u32(hdr, id);
-	wl_msg_push_u32(hdr, surface);
-	wl_msg_end(hdr, 0);
-	return id;
-}
-
-static void
-wl_viewport_set_source(u32 self, u32 x, u32 y, u32 w, u32 h)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
-	wl_msg_push_u32(hdr, x);
-	wl_msg_push_u32(hdr, y);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-	wl_msg_end(hdr, 0);
-}
-
-static void
-wl_viewport_set_destination(u32 self, u32 w, u32 h)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 2);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-	wl_msg_end(hdr, 0);
-}
 /******************************************************************************/
 
 static void
@@ -423,8 +391,8 @@ wl_wait_for_configure(u32 layer_surface)
 		WL_Hdr hdr = wl_recv_hdr();
 		if (hdr.obj == layer_surface && hdr.opcode == 0) {
 			u32 serial = wl_recv_u32();
-			u32 width = wl_recv_u32();
-			u32 height = wl_recv_u32();
+			wl_recv_u32(); // width
+			wl_recv_u32(); // height
 			return serial;
 		}
 		wl_recv(hdr.size - sizeof(hdr)); // skip

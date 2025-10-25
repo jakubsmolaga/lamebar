@@ -41,7 +41,6 @@ pixelbuf_copy(PixelBuf dst, const PixelBuf src, u32 x, u32 y, u32 scale)
 	u32 dst_stride = dst.w;
 	u32 src_stride = src.w;
 	u32 block_w    = src.w * scale;
-	u32 block_h    = src.h * scale;
 
 	for (u32 sy = 0; sy < src.h; ++sy) {
 		const Pixel *src_row = src.data + sy * src_stride;
