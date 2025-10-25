@@ -7,7 +7,7 @@ generate:
 	./build/embed_assets assets
 
 debug:
-	gcc $(DEBUG_FLAGS) $(CFLAGS) -o build/lamebar src/lamebar/*.c src/base/*.c src/generated/*.c
+	gcc $(DEBUG_FLAGS) $(CFLAGS) -o build/lamebar src/lamebar/unity_build.c
 
 release:
-	gcc $(RELEASE_FLAGS) $(CFLAGS) -o build/lamebar src/lamebar/*.c src/base/*.c src/generated/*.c
+	gcc $(RELEASE_FLAGS) $(CFLAGS) -o build/lamebar src/lamebar/unity_build.c
