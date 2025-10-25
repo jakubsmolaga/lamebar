@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "wl.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +49,6 @@ wl_connect(void)
 		exit(1);
 	}
 }
-
 
 static void
 wl_fill_rcvbuf(void)
@@ -343,6 +343,56 @@ wl_viewport_set_destination(u32 self, u32 w, u32 h)
 	wl_msg_push_u32(hdr, h);
 	wl_msg_end(hdr, 0);
 }
+/******************************************************************************/
+
+static void
+crash(const char *msg)
+{
+	if (errno != 0) perror(msg);
+	else fprintf(stderr, "ERROR: %s\n", msg);
+	exit(1);
+}
+
+
+static void
+wl_bind_interfaces(u32 registry, u32 *compositor, u32 *layer_shell, u32 *shm)
+{
+	wl_fill_rcvbuf();
+	while (wl_has_data()) {
+		WL_Hdr hdr = wl_recv_hdr();
+		if (hdr.obj != registry || hdr.opcode != 0) {
+			wl_recv(hdr.size - sizeof(hdr)); // skip
+			continue;
+		}
+		u32 name = wl_recv_u32();
+		char *iface = wl_recv_str();
+		u32 version = wl_recv_u32();
+		if (strcmp(iface, "wl_compositor") == 0)
+			*compositor = wl_registry_bind(registry, name, iface, version);
+		else if (strcmp(iface, "zwlr_layer_shell_v1") == 0)
+			*layer_shell = wl_registry_bind(registry, name, iface, version);
+		else if (strcmp(iface, "wl_shm") == 0)
+			*shm = wl_registry_bind(registry, name, iface, version);
+	}
+	if (!compositor) crash("your compositor does not support wl_compositor (how?)");
+	if (!layer_shell) crash("your compositor does not support zwlr_layer_shell_v1"); 
+	if (!shm) crash("your compositor does not support wl_shm");
+}
+
+static u32
+wl_wait_for_configure(u32 layer_surface)
+{
+	while (true) {
+		WL_Hdr hdr = wl_recv_hdr();
+		if (hdr.obj == layer_surface && hdr.opcode == 0) {
+			u32 serial = wl_recv_u32();
+			u32 width = wl_recv_u32();
+			u32 height = wl_recv_u32();
+			return serial;
+		}
+		wl_recv(hdr.size - sizeof(hdr)); // skip
+	}
+}
 
 /********************************* public api *********************************/
 
@@ -354,29 +404,10 @@ void wl_init(u32 scale) {
 	wl.rcv_pos = arena_pos(&wl.rcv_arena);
 
 	wl_connect();
+
 	u32 registry = wl_display_get_registry();
-	wl_fill_rcvbuf();
 	u32 compositor = 0, layer_shell = 0, shm = 0;
-	while (wl_has_data()) {
-		WL_Hdr hdr = wl_recv_hdr();
-		if (hdr.obj != registry || hdr.opcode != 0) {
-			wl_recv(hdr.size - sizeof(hdr)); // skip
-			continue;
-		}
-		u32 name = wl_recv_u32();
-		char *iface = wl_recv_str();
-		u32 version = wl_recv_u32();
-		if (strcmp(iface, "wl_compositor") == 0)
-			compositor = wl_registry_bind(registry, name, iface, version);
-		else if (strcmp(iface, "zwlr_layer_shell_v1") == 0)
-			layer_shell = wl_registry_bind(registry, name, iface, version);
-		else if (strcmp(iface, "wl_shm") == 0)
-			shm = wl_registry_bind(registry, name, iface, version);
-	}
-	if (compositor == 0 || layer_shell == 0 || shm == 0) {
-		fprintf(stderr, "one of the required interfaces is missing\n");
-		exit(1);
-	}
+	wl_bind_interfaces(registry, &compositor, &layer_shell, &shm);
 
 	wl.surface = wl_compositor_create_surface(compositor);
 	u32 layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, wl.surface);
@@ -386,18 +417,7 @@ void wl_init(u32 scale) {
 	zwlr_layer_surface_v1_set_size(layer_surface, width * scale, height * scale);
 	zwlr_layer_surface_v1_set_anchor(layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
 	wl_surface_commit(wl.surface);
-	u32 serial;
-	while (true) {
-		WL_Hdr hdr = wl_recv_hdr();
-		if (hdr.obj != layer_surface || hdr.opcode != 0) {
-			wl_recv(hdr.size - sizeof(hdr)); // skip
-			continue;
-		}
-		serial = wl_recv_u32();
-		u32 width = wl_recv_u32();
-		u32 height = wl_recv_u32();
-		break;
-	}
+	u32 serial = wl_wait_for_configure(layer_surface);
 	zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
 	int framebuf_fd;
