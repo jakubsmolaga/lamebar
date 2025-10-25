@@ -1,7 +1,6 @@
 #include "ipc.h"
-#include <stdio.h>
+#include "../base/log.h"
 #include <unistd.h>
-#include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/types.h>
@@ -17,23 +16,14 @@ static int ipc_pipe_fd = -1;
 void ipc_init(void) {
 	unlink(ipc_pipe_path);
 	int ret = mkfifo(ipc_pipe_path, 0600);
-	if (ret < 0) {
-		perror("failed to create fifo");
-		exit(1);
-	}
+	log_assert(ret >= 0, "failed to create fifo");
 	ipc_pipe_fd = open(ipc_pipe_path, O_RDWR | O_CREAT, 0600);
-	if (ipc_pipe_fd < 0) {
-		perror("failed to open pipe");
-		exit(1);
-	}
+	log_assert(ipc_pipe_fd >= 0, "failed to open pipe");
 }
 
 void ipc_send(IPC_Cmd cmd) { 
 	int fd = open(ipc_pipe_path, O_WRONLY);
-	if (fd < 0) {
-		perror("failed to open pipe");
-		exit(1);
-	}
+	log_assert(fd >= 0, "failed to open pipe");
 	switch (cmd) {
 	case IPC_CMD_SHOW:
 		write(fd, "1", 1);
@@ -42,15 +32,13 @@ void ipc_send(IPC_Cmd cmd) {
 		write(fd, "0", 1);
 		break;
 	default:
-		fprintf(stderr, "unknown cmd %d\n", cmd);
-		exit(1);
+		log_crash("unknown cmd %d", cmd);
 	}
 }
 
 IPC_Cmd ipc_recv(void) { 
 	char c;
 	int ret = read(ipc_pipe_fd, &c, 1);
-	printf("ipc_recv %d\n", ret);
 	switch (c) {
 	case '1': return IPC_CMD_SHOW;
 	case '0': return IPC_CMD_HIDE;

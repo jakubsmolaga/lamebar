@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include "../base/arena.h"
+#include "../base/log.h"
 
 static struct {
 	int fd;
@@ -33,10 +34,7 @@ wl_connect(void)
 	char *filename = getenv("WAYLAND_DISPLAY");
 	if (!filename) filename = "wayland-0";
 	char *dirname = getenv("XDG_RUNTIME_DIR");
-	if (!dirname) {
-		fprintf(stderr, "XDG_RUNTIME_DIR not set");
-		exit(1);
-	}
+	log_assert(dirname, "XDG_RUNTIME_DIR not set");
 	struct sockaddr_un addr = { .sun_family = AF_UNIX };
 	addr.sun_path[0] = '\0';
 	strcat(addr.sun_path, dirname);
@@ -44,10 +42,7 @@ wl_connect(void)
 	strcat(addr.sun_path, filename);
 	wl.fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	int ret = connect(wl.fd, (void*)&addr, sizeof(addr));
-	if (ret < 0) {
-		perror("failed to connect to wayland socket");
-		exit(1);
-	}
+	log_assert(ret >= 0, "failed to connect to wayland socket");
 }
 
 static void
@@ -146,10 +141,7 @@ wl_create_shared_buffer(u32 size, int *out_fd)
 	int fd = memfd_create("lamebar-shm", MFD_CLOEXEC);
 	ftruncate(fd, size);
 	void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (ptr == MAP_FAILED) {
-		perror("failed to mmap");
-		exit(1);
-	}
+	log_assert(ptr != MAP_FAILED, "failed to mmap shared memory");
 	*out_fd = fd;
 	return ptr;
 }
@@ -166,8 +158,7 @@ wl_drain_events(void)
 		u32 obj_id = wl_recv_u32();
 		u32 errcode = wl_recv_u32();
 		char *msg = wl_recv_str();
-		printf("WAYLAND ERROR: %s\n", msg);
-		exit(1);
+		log_crash("wayland error (%d): %s", errcode, msg);
 	}
 }
 
@@ -346,15 +337,6 @@ wl_viewport_set_destination(u32 self, u32 w, u32 h)
 /******************************************************************************/
 
 static void
-crash(const char *msg)
-{
-	if (errno != 0) perror(msg);
-	else fprintf(stderr, "ERROR: %s\n", msg);
-	exit(1);
-}
-
-
-static void
 wl_bind_interfaces(u32 registry, u32 *compositor, u32 *layer_shell, u32 *shm)
 {
 	wl_fill_rcvbuf();
@@ -374,9 +356,9 @@ wl_bind_interfaces(u32 registry, u32 *compositor, u32 *layer_shell, u32 *shm)
 		else if (strcmp(iface, "wl_shm") == 0)
 			*shm = wl_registry_bind(registry, name, iface, version);
 	}
-	if (!compositor) crash("your compositor does not support wl_compositor (how?)");
-	if (!layer_shell) crash("your compositor does not support zwlr_layer_shell_v1"); 
-	if (!shm) crash("your compositor does not support wl_shm");
+	log_assert(compositor != 0, "your compositor does not support wl_compositor (how?)");
+	log_assert(layer_shell != 0, "your compositor does not support zwlr_layer_shell_v1"); 
+	log_assert(shm != 0, "your compositor does not support wl_shm");
 }
 
 static u32
@@ -445,7 +427,9 @@ void wl_hide(void) {
 void
 wl_show(PixelBuf pixels)
 {
-	assert(pixels.w <= wl.framebuf.w && pixels.h <= wl.framebuf.h);
+	// TODO: it would be cleaner to resize the framebuffer dynamically
+	//       but I'm not sure if it's worth the effort
+	log_assert(pixels.w <= wl.framebuf.w && pixels.h <= wl.framebuf.h, "frame is too large for the framebuffer");
 	wl_drain_events();
 	memset(wl.framebuf.data, 0, wl.framebuf.w * wl.framebuf.h * sizeof(Pixel));
 	pixelbuf_copy(wl.framebuf, pixels, wl.framebuf.w - pixels.w * wl.scale, 0, wl.scale);
