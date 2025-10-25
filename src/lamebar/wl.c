@@ -20,10 +20,11 @@ static struct {
 	u32 next_id;
 	Arena rcv_arena, snd_arena;
 	void *rcv_pos;
-	PixelBuf framebuf;
+	int shm_fd;
+	PixelBuf fb;
 	u32 scale;
 	// object ids
-	u32 surface, buffer;
+	u32 surface, buffer, shm, shm_pool, layer_surface;
 } wl;
 
 typedef struct { u32 obj; u16 opcode, size; } WL_Hdr;
@@ -136,14 +137,54 @@ wl_msg_end(WL_Hdr *hdr, int extra_fd)
 }
 
 static void*
-wl_create_shared_buffer(u32 size, int *out_fd)
+wl_create_shared_memory(u32 size, int *out_fd)
 {
+	u64 page_size = sysconf(_SC_PAGESIZE);
+	size = align_up(size, page_size);
+
 	int fd = memfd_create("lamebar-shm", MFD_CLOEXEC);
 	ftruncate(fd, size);
-	void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	
+	// reserve address space so the buffer can grow without moving
+	void *reserved = mmap(NULL, GB(4), PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	log_assert(reserved != MAP_FAILED, "failed to mmap shared memory");
+
+	// map the buffer to the file descriptor
+	// NOTE: this will overwrite the reserved address space
+	//       which is what we want
+	void *ptr = mmap(reserved, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
 	log_assert(ptr != MAP_FAILED, "failed to mmap shared memory");
+
 	*out_fd = fd;
 	return ptr;
+}
+
+static void
+wl_grow_shared_memory(int fd, void *ptr, u64 old_size, u64 new_size)
+{
+	log_assert(old_size < new_size, "tried to grow shared memory to smaller size");
+
+	// make sure sizes are page-aligned
+	u64 page_size = sysconf(_SC_PAGESIZE);
+	old_size = align_up(old_size, page_size);
+	new_size = align_up(new_size, page_size);
+
+	// resize the underlying memory
+	ftruncate(fd, new_size);
+
+	// map the new memory
+	// NOTE: we want to only map the "extension" of the new memory
+	//       instead of the entire new size, doing it the other way
+	//       would work, but it would destroy the page table and
+	//       flush the TLB
+	//       additionally, mremap() cannot be used because it can't
+	//       overwrite existing mappings and we're keeping the
+	//       anonymous mapping around to "reserve" the address space
+	void *ext_ptr = ptr + old_size;
+	u64 ext_size = new_size - old_size;
+	void *result = mmap(ext_ptr, ext_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, old_size);
+	log_assert(result != MAP_FAILED, "failed to mmap shared memory");
+	log_assert(result == ext_ptr, "mmap did not return the expected address");
 }
 
 static void
@@ -277,6 +318,20 @@ wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_For
 }
 
 static void
+wl_shm_pool_destroy(u32 self)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	wl_msg_end(hdr, 0);
+}
+
+static void
+wl_buffer_destroy(u32 self)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_end(hdr, 0);
+}
+
+static void
 wl_surface_commit(u32 self)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 6);
@@ -376,6 +431,29 @@ wl_wait_for_configure(u32 layer_surface)
 	}
 }
 
+static void
+wl_ensure_fb_size(u32 w, u32 h)
+{
+	u64 old_size = wl.fb.w * wl.fb.h * sizeof(Pixel);
+	u64 new_size = w * h * sizeof(Pixel);
+	if (old_size >= new_size) return;
+	wl_buffer_destroy(wl.buffer);
+	wl_shm_pool_destroy(wl.shm_pool);
+	wl_grow_shared_memory(wl.shm_fd, wl.fb.data, old_size, new_size);
+	wl.fb.w = w;
+	wl.fb.h = h;
+	wl.shm_pool = wl_shm_create_pool(wl.shm, wl.shm_fd, new_size);
+
+	u32 stride = w * sizeof(Pixel);
+	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, w, h, stride, WL_FORMAT_ARGB8888);
+
+	zwlr_layer_surface_v1_set_size(wl.layer_surface, w, h);
+	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
+	wl_surface_commit(wl.surface);
+	u32 serial = wl_wait_for_configure(wl.layer_surface);
+	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
+}
+
 /********************************* public api *********************************/
 
 void wl_init(u32 scale) {
@@ -388,52 +466,50 @@ void wl_init(u32 scale) {
 	wl_connect();
 
 	u32 registry = wl_display_get_registry();
-	u32 compositor = 0, layer_shell = 0, shm = 0;
-	wl_bind_interfaces(registry, &compositor, &layer_shell, &shm);
+	u32 compositor = 0, layer_shell = 0;
+	wl_bind_interfaces(registry, &compositor, &layer_shell, &wl.shm);
 
 	wl.surface = wl_compositor_create_surface(compositor);
-	u32 layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, wl.surface);
+	wl.layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, wl.surface);
 	// TODO: this should probably be parameterized somehow
-	u32 width = 200;
-	u32 height = 20;
-	zwlr_layer_surface_v1_set_size(layer_surface, width * scale, height * scale);
-	zwlr_layer_surface_v1_set_anchor(layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
+	u32 width = 100;
+	u32 height = 5;
+	zwlr_layer_surface_v1_set_size(wl.layer_surface, width * scale, height * scale);
+	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
 	wl_surface_commit(wl.surface);
-	u32 serial = wl_wait_for_configure(layer_surface);
-	zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+	u32 serial = wl_wait_for_configure(wl.layer_surface);
+	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
 
-	int framebuf_fd;
-	wl.framebuf.w = width * scale;
-	wl.framebuf.h = height * scale;
-	u64 framebuf_size = wl.framebuf.w * wl.framebuf.h * sizeof(Pixel);
-	wl.framebuf.data = wl_create_shared_buffer(framebuf_size, &framebuf_fd);
-	memset(wl.framebuf.data, 0, framebuf_size);
-	u32 shm_pool = wl_shm_create_pool(shm, framebuf_fd, framebuf_size);
-	u32 stride = wl.framebuf.w * sizeof(Pixel);
-	wl.buffer = wl_shm_pool_create_buffer(shm_pool, 0, wl.framebuf.w, wl.framebuf.h, stride, WL_FORMAT_ARGB8888);
+	wl.fb.w = width * scale;
+	wl.fb.h = height * scale;
+	u64 framebuf_size = wl.fb.w * wl.fb.h * sizeof(Pixel);
+	wl.fb.data = wl_create_shared_memory(framebuf_size, &wl.shm_fd);
+	memset(wl.fb.data, 0, framebuf_size);
+	wl.shm_pool = wl_shm_create_pool(wl.shm, wl.shm_fd, framebuf_size);
+	u32 stride = wl.fb.w * sizeof(Pixel);
+	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, wl.fb.w, wl.fb.h, stride, WL_FORMAT_ARGB8888);
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
-	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
+	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
 	wl_drain_events();
 }
 
 void wl_hide(void) {
-	memset(wl.framebuf.data, 0, wl.framebuf.w * wl.framebuf.h * sizeof(Pixel));
+	memset(wl.fb.data, 0, wl.fb.w * wl.fb.h * sizeof(Pixel));
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
-	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
+	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
 }
 
 void
 wl_show(PixelBuf pixels)
 {
-	// TODO: it would be cleaner to resize the framebuffer dynamically
-	//       but I'm not sure if it's worth the effort
-	log_assert(pixels.w <= wl.framebuf.w && pixels.h <= wl.framebuf.h, "frame is too large for the framebuffer");
+	wl_ensure_fb_size(pixels.w * wl.scale, pixels.h * wl.scale);
+	log_assert(pixels.w <= wl.fb.w && pixels.h <= wl.fb.h, "frame is too large for the framebuffer");
 	wl_drain_events();
-	memset(wl.framebuf.data, 0, wl.framebuf.w * wl.framebuf.h * sizeof(Pixel));
-	pixelbuf_copy(wl.framebuf, pixels, wl.framebuf.w - pixels.w * wl.scale, 0, wl.scale);
+	memset(wl.fb.data, 0, wl.fb.w * wl.fb.h * sizeof(Pixel));
+	pixelbuf_copy(wl.fb, pixels, wl.fb.w - pixels.w * wl.scale, 0, wl.scale);
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
-	wl_surface_damage_buffer(wl.surface, 0, 0, wl.framebuf.w, wl.framebuf.h);
+	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
 }
