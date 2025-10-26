@@ -12,8 +12,6 @@
 #define alignof(t) _Alignof(t)
 #endif
 
-#define align_up(x, align) (((x) + (align) - 1) & ~((align) - 1))
-
 typedef uint8_t      u8;
 typedef uint16_t     u16;
 typedef uint32_t     u32;
@@ -26,6 +24,8 @@ typedef int64_t      i64;
 #define KB(x) (x * 1024LL)
 #define MB(x) (x * 1024LL * 1024LL)
 #define GB(x) (x * 1024LL * 1024LL * 1024LL)
+
+static u64 align_up(u64 x, u64 align) { return (x + align - 1) & ~(align - 1); }
 
 typedef struct { u8 b, g, r, a; } Pixel;
 
