@@ -79,7 +79,7 @@ wl_msg_begin(u32 obj, u16 opcode) {
 	WL_Hdr *hdr = arena_push(&wl.snd_arena, WL_Hdr);
 	hdr->obj = obj;
 	hdr->opcode = opcode;
-	hdr->size = 0;
+	hdr->size = sizeof(WL_Hdr);
 	return hdr;
 }
 
@@ -88,6 +88,7 @@ wl_msg_push(WL_Hdr *hdr, const void *data, u64 len)
 {
 	void *ptr = arena_push_raw(&wl.snd_arena, len, 1);
 	memcpy(ptr, data, len);
+	hdr->size += len;
 	return ptr;
 }
 
@@ -99,18 +100,23 @@ static void wl_msg_push_str(WL_Hdr *hdr, const char *str) {
 }
 
 static void
-wl_msg_end(WL_Hdr *hdr, int extra_fd)
+wl_flush(void)
 {
-	hdr->size = arena_pos(&wl.snd_arena) - (void*)hdr;
-	// use simple send if there is no extra_fd to transfer
-	if (extra_fd == 0) {
-		send(wl.fd, hdr, hdr->size, 0);
-		arena_clear(&wl.snd_arena);
-		return;
-	}
+	void *base = wl.snd_arena.base;
+	u64 size = wl.snd_arena.pos - base;
+	if (size > 0) send(wl.fd, base, size, 0);
+	arena_clear(&wl.snd_arena);
+}
+
+static void
+wl_flush_with_fd(int extra_fd)
+{
+	void *base = wl.snd_arena.base;
+	u64 size = wl.snd_arena.pos - base;
+	log_assert(size > 0, "wl_flush_with_fd() called with empty buffer");
 	struct iovec iov = {
-		.iov_base = hdr,
-		.iov_len  = hdr->size,
+		.iov_base = base,
+		.iov_len  = size,
 	};
 
 	u8 control[CMSG_SPACE(sizeof(extra_fd))];
@@ -209,7 +215,6 @@ wl_display_get_registry(void)
 	u32 id = wl.next_id++;
 	WL_Hdr *hdr = wl_msg_begin(1, 1);
 	wl_msg_push_u32(hdr, id);
-	wl_msg_end(hdr, 0);
 	return id;
 }
 
@@ -222,7 +227,6 @@ wl_registry_bind(u32 self, u32 name, const char *iface, u32 version)
 	wl_msg_push_str(hdr, iface);
 	wl_msg_push_u32(hdr, version);
 	wl_msg_push_u32(hdr, id);
-	wl_msg_end(hdr, 0);
 	return id;
 }
 
@@ -232,7 +236,6 @@ wl_compositor_create_surface(u32 self)
 	u32 id = wl.next_id++;
 	WL_Hdr *hdr = wl_msg_begin(self, 0);
 	wl_msg_push_u32(hdr, id);
-	wl_msg_end(hdr, 0);
 	return id;
 }
 
@@ -246,7 +249,6 @@ zwlr_layer_shell_v1_get_layer_surface(u32 self, u32 surface)
 	wl_msg_push_u32(hdr, 0); // output
 	wl_msg_push_u32(hdr, 3); // layer=overlay
 	wl_msg_push_str(hdr, "lamebar");
-	wl_msg_end(hdr, 0);
 	return id;
 }
 
@@ -256,7 +258,6 @@ zwlr_layer_surface_v1_set_size(u32 self, u32 w, u32 h)
 	WL_Hdr *hdr = wl_msg_begin(self, 0);
 	wl_msg_push_u32(hdr, w);
 	wl_msg_push_u32(hdr, h);
-	wl_msg_end(hdr, 0);
 }
 
 typedef u32 WL_Anchor;
@@ -272,7 +273,6 @@ zwlr_layer_surface_v1_set_anchor(u32 self, WL_Anchor anchor)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 1);
 	wl_msg_push_u32(hdr, anchor);
-	wl_msg_end(hdr, 0);
 }
 
 static void
@@ -280,7 +280,6 @@ zwlr_layer_surface_v1_ack_configure(u32 self, u32 serial)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 6);
 	wl_msg_push_u32(hdr, serial);
-	wl_msg_end(hdr, 0);
 }
 
 static u32
@@ -290,7 +289,7 @@ wl_shm_create_pool(u32 self, int mem_fd, u32 size)
 	WL_Hdr *hdr = wl_msg_begin(self, 0);
 	wl_msg_push_u32(hdr, id);
 	wl_msg_push_u32(hdr, size);
-	wl_msg_end(hdr, mem_fd);
+	wl_flush_with_fd(mem_fd);
 	return id;
 }
 
@@ -311,7 +310,6 @@ wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_For
 	wl_msg_push_u32(hdr, h);
 	wl_msg_push_u32(hdr, stride);
 	wl_msg_push_u32(hdr, format);
-	wl_msg_end(hdr, 0);
 	return id;
 }
 
@@ -319,21 +317,18 @@ static void
 wl_shm_pool_destroy(u32 self)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 1);
-	wl_msg_end(hdr, 0);
 }
 
 static void
 wl_buffer_destroy(u32 self)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_end(hdr, 0);
 }
 
 static void
 wl_surface_commit(u32 self)
 {
 	WL_Hdr *hdr = wl_msg_begin(self, 6);
-	wl_msg_end(hdr, 0);
 }
 
 static void
@@ -343,7 +338,6 @@ wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
 	wl_msg_push_u32(hdr, buffer);
 	wl_msg_push_u32(hdr, x);
 	wl_msg_push_u32(hdr, y);
-	wl_msg_end(hdr, 0);
 }
 
 static void
@@ -354,7 +348,6 @@ wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
 	wl_msg_push_u32(hdr, y);
 	wl_msg_push_u32(hdr, w);
 	wl_msg_push_u32(hdr, h);
-	wl_msg_end(hdr, 0);
 }
 
 /******************************************************************************/
@@ -418,6 +411,7 @@ wl_ensure_fb_size(u32 w, u32 h)
 	zwlr_layer_surface_v1_set_size(wl.layer_surface, w, h);
 	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
 	wl_surface_commit(wl.surface);
+	wl_flush();
 	u32 serial = wl_wait_for_configure(wl.layer_surface);
 	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
 }
@@ -434,6 +428,7 @@ void wl_init(u32 scale) {
 	wl_connect();
 
 	u32 registry = wl_display_get_registry();
+	wl_flush();
 	u32 compositor = 0, layer_shell = 0;
 	wl_bind_interfaces(registry, &compositor, &layer_shell, &wl.shm);
 
@@ -445,6 +440,7 @@ void wl_init(u32 scale) {
 	zwlr_layer_surface_v1_set_size(wl.layer_surface, width * scale, height * scale);
 	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
 	wl_surface_commit(wl.surface);
+	wl_flush();
 	u32 serial = wl_wait_for_configure(wl.layer_surface);
 	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
 
@@ -459,6 +455,7 @@ void wl_init(u32 scale) {
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
+	wl_flush();
 	wl_drain_events();
 }
 
@@ -467,6 +464,7 @@ void wl_hide(void) {
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
+	wl_flush();
 }
 
 void
@@ -474,10 +472,12 @@ wl_show(PixelBuf pixels)
 {
 	wl_ensure_fb_size(pixels.w * wl.scale, pixels.h * wl.scale);
 	log_assert(pixels.w <= wl.fb.w && pixels.h <= wl.fb.h, "frame is too large for the framebuffer");
+	wl_flush();
 	wl_drain_events();
 	memset(wl.fb.data, 0, wl.fb.w * wl.fb.h * sizeof(Pixel));
 	pixelbuf_copy(wl.fb, pixels, wl.fb.w - pixels.w * wl.scale, 0, wl.scale);
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
+	wl_flush();
 }
