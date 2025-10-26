@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "../base/pixel.h"
 #include "../base/arena.h"
 #include "../base/arena.c"
 
@@ -143,7 +144,7 @@ write_header(const char *path, Asset *assets)
 	Arena tmp = arena_create();
 	FILE *fp = fopen(path, "w");
 	fprintf(fp, "#pragma once\n");
-	fprintf(fp, "#include \"../base/base.h\"\n");
+	fprintf(fp, "#include \"../base/pixel.h\"\n");
 	fprintf(fp, "\n");
 	fprintf(fp, "typedef u8 GlyphId;\n");
 	fprintf(fp, "enum {\n");
@@ -169,7 +170,6 @@ write_c(const char *path, Asset *assets)
 	Arena tmp = arena_create();
 	FILE *fp = fopen(path, "w");
 	fprintf(fp, "#include \"glyphs.h\"\n");
-	fprintf(fp, "#include \"../base/base.h\"\n");
 	fprintf(fp, "\n");
 	for (Asset *a = assets; a != NULL; a = a->next) {
 		fprintf(fp, "static u8 glyphs_data_%s[] = {", a->name);
