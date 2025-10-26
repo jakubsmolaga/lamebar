@@ -316,19 +316,19 @@ wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_For
 static void
 wl_shm_pool_destroy(u32 self)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	wl_msg_begin(self, 1);
 }
 
 static void
 wl_buffer_destroy(u32 self)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_begin(self, 0);
 }
 
 static void
 wl_surface_commit(u32 self)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 6);
+	wl_msg_begin(self, 6);
 }
 
 static void
