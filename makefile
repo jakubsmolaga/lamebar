@@ -1,4 +1,4 @@
-CFLAGS=-Wall -Wextra -Wno-unused -xc -std=gnu11
+CFLAGS=-Wall -Wextra -xc -std=gnu11
 DEBUG_FLAGS=-g -fsanitize=address -fsanitize=undefined
 RELEASE_FLAGS=-O2 -flto
 
