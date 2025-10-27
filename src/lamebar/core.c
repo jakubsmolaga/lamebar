@@ -51,6 +51,24 @@ digit_to_glyph_id(u32 digit)
 	return 0;
 }
 
+static u32 get_battery_glyphs(u32 battery_percent, GlyphId *out)
+{
+	u32 len = 0;
+	// TODO: this probably should be configurable
+	if (battery_percent > 50) {
+		out[len++] = GLYPH_ID_BATTERY_FULL;
+	} else if (battery_percent > 20) {
+		out[len++] = GLYPH_ID_BATTERY_HALF;
+	} else {
+		out[len++] = GLYPH_ID_BATTERY_LOW;
+	}
+	out[len++] = GLYPH_ID_SPACE;
+	out[len++] = digit_to_glyph_id((battery_percent / 10) % 10);
+	out[len++] = digit_to_glyph_id((battery_percent / 1 ) % 10);
+	out[len++] = GLYPH_ID_PERCENT;
+	return len;
+}
+
 static u32
 get_glyphs(TimeAndDate td, u32 battery_percent, GlyphId *out)
 {
@@ -73,21 +91,12 @@ get_glyphs(TimeAndDate td, u32 battery_percent, GlyphId *out)
 	out[len++] = GLYPH_ID_COLON;
 	out[len++] = digit_to_glyph_id((td.minute / 10) % 10);
 	out[len++] = digit_to_glyph_id((td.minute / 1 ) % 10);
-	out[len++] = GLYPH_ID_SPACE;
-	out[len++] = GLYPH_ID_PIPE;
-	out[len++] = GLYPH_ID_SPACE;
-	// TODO: this probably should be configurable
-	if (battery_percent > 50) {
-		out[len++] = GLYPH_ID_BATTERY_FULL;
-	} else if (battery_percent > 20) {
-		out[len++] = GLYPH_ID_BATTERY_HALF;
-	} else {
-		out[len++] = GLYPH_ID_BATTERY_LOW;
+	if (battery_percent > 0) {
+		out[len++] = GLYPH_ID_SPACE;
+		out[len++] = GLYPH_ID_PIPE;
+		out[len++] = GLYPH_ID_SPACE;
+		len += get_battery_glyphs(battery_percent, out + len);
 	}
-	out[len++] = GLYPH_ID_SPACE;
-	out[len++] = digit_to_glyph_id((battery_percent / 10) % 10);
-	out[len++] = digit_to_glyph_id((battery_percent / 1 ) % 10);
-	out[len++] = GLYPH_ID_PERCENT;
 	return len;
 }
 
