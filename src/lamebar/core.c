@@ -29,6 +29,17 @@ get_battery_percent(void)
 	return capacity;
 }
 
+static bool
+is_battery_charging(void)
+{
+	FILE *fp = fopen("/sys/class/power_supply/BAT0/status", "r");
+	if (!fp) return false;
+	char status[1024];
+	fscanf(fp, "%s", status);
+	fclose(fp);
+	return strcmp(status, "Charging") == 0;
+}
+
 static GlyphId
 digit_to_glyph_id(u32 digit)
 {
@@ -51,11 +62,13 @@ digit_to_glyph_id(u32 digit)
 	return 0;
 }
 
-static u32 get_battery_glyphs(u32 battery_percent, GlyphId *out)
+static u32 get_battery_glyphs(u32 battery_percent, bool charging, GlyphId *out)
 {
 	u32 len = 0;
 	// TODO: this probably should be configurable
-	if (battery_percent > 50) {
+	if (charging) {
+		out[len++] = GLYPH_ID_BATTERY_CHARGING;
+	} else if (battery_percent > 50) {
 		out[len++] = GLYPH_ID_BATTERY_FULL;
 	} else if (battery_percent > 20) {
 		out[len++] = GLYPH_ID_BATTERY_HALF;
@@ -70,7 +83,7 @@ static u32 get_battery_glyphs(u32 battery_percent, GlyphId *out)
 }
 
 static u32
-get_glyphs(TimeAndDate td, u32 battery_percent, GlyphId *out)
+get_glyphs(TimeAndDate td, u32 battery_percent, bool battery_charging, GlyphId *out)
 {
 	u32 len = 0;
 	out[len++] = digit_to_glyph_id((td.year / 1000) % 10);
@@ -95,7 +108,7 @@ get_glyphs(TimeAndDate td, u32 battery_percent, GlyphId *out)
 		out[len++] = GLYPH_ID_SPACE;
 		out[len++] = GLYPH_ID_PIPE;
 		out[len++] = GLYPH_ID_SPACE;
-		len += get_battery_glyphs(battery_percent, out + len);
+		len += get_battery_glyphs(battery_percent, battery_charging, out + len);
 	}
 	return len;
 }
@@ -149,9 +162,10 @@ next_frame(Arena *arena)
 {
 	TimeAndDate td = get_time_and_date();
 	u32 battery_percent = get_battery_percent();
+	bool battery_charging = is_battery_charging();
 
 	static GlyphId glyph_ids[1024];
-	u32 glyph_ids_len = get_glyphs(td, battery_percent, glyph_ids);
+	u32 glyph_ids_len = get_glyphs(td, battery_percent, battery_charging, glyph_ids);
 
 	u32 base_w, base_h;
 	measure_glyphs(glyph_ids, glyph_ids_len, &base_w, &base_h);
