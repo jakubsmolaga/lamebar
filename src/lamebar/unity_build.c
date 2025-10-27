@@ -4,6 +4,7 @@
 #include "core.c"
 #include "ipc.c"
 #include "wl.c"
+#include "bufsock.c"
 
 #include "../base/arena.c"
 #include "../base/log.c"
