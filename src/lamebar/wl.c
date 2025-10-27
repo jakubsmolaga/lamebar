@@ -19,7 +19,7 @@ static struct {
 	int shm_fd;
 	PixelBuf fb;
 	// object ids
-	u32 display, surface, buffer, shm, shm_pool, layer_surface;
+	u32 display, compositor, surface, buffer, shm, shm_pool, layer_surface, empty_region;
 } wl = {0};
 
 typedef struct { u32 obj; u16 opcode, size; } WL_Hdr;
@@ -42,6 +42,7 @@ enum {
 static const u16 WL_DISPLAY_GET_REGISTRY = 1;
 static const u16 WL_REGISTRY_BIND = 0;
 static const u16 WL_COMPOSITOR_CREATE_SURFACE = 0;
+static const u16 WL_COMPOSITOR_CREATE_REGION = 1;
 static const u16 ZWLR_LAYER_SHELL_V1_GET_LAYER_SURFACE = 0;
 static const u16 ZWLR_LAYER_SURFACE_V1_SET_SIZE = 0;
 static const u16 ZWLR_LAYER_SURFACE_V1_SET_ANCHOR = 1;
@@ -50,8 +51,9 @@ static const u16 WL_SHM_CREATE_POOL = 0;
 static const u16 WL_SHM_POOL_CREATE_BUFFER = 0;
 static const u16 WL_SHM_POOL_DESTROY = 1;
 static const u16 WL_BUFFER_DESTROY = 0;
-static const u16 WL_SURFACE_COMMIT = 6;
 static const u16 WL_SURFACE_ATTACH = 1;
+static const u16 WL_SURFACE_SET_INPUT_REGION = 5;
+static const u16 WL_SURFACE_COMMIT = 6;
 static const u16 WL_SURFACE_DAMAGE_BUFFER = 9;
 
 // event opcodes
@@ -117,6 +119,15 @@ wl_compositor_create_surface(u32 self)
 {
 	u32 id = wl.next_id++;
 	WL_Hdr *hdr = wl_msg_begin(self, WL_COMPOSITOR_CREATE_SURFACE);
+	wl_msg_push_u32(hdr, id);
+	return id;
+}
+
+static u32
+wl_compositor_create_region(u32 self)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, WL_COMPOSITOR_CREATE_REGION);
 	wl_msg_push_u32(hdr, id);
 	return id;
 }
@@ -216,6 +227,13 @@ wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
 	wl_msg_push_u32(hdr, y);
 	wl_msg_push_u32(hdr, w);
 	wl_msg_push_u32(hdr, h);
+}
+
+static void
+wl_surface_set_input_region(u32 self, u32 region)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, WL_SURFACE_SET_INPUT_REGION);
+	wl_msg_push_u32(hdr, region);
 }
 
 /******************************** misc helpers ********************************/
@@ -371,6 +389,10 @@ wl_ensure_fb_size(u32 w, u32 h)
 	u32 format = WL_FORMAT_ARGB8888;
 	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, w, h, stride, format);
 
+	if (!wl.empty_region)
+		wl.empty_region = wl_compositor_create_region(wl.compositor);
+	wl_surface_set_input_region(wl.surface, wl.empty_region);
+
 	u32 anchor = WL_ANCHOR_TOP | WL_ANCHOR_RIGHT;
 	zwlr_layer_surface_v1_set_size(wl.layer_surface, w, h);
 	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, anchor);
@@ -392,10 +414,10 @@ void wl_init(void) {
 	u32 registry = wl_display_get_registry();
 	bufsock_flush(&wl.bs);
 
-	u32 compositor = 0, layer_shell = 0;
-	wl_bind_interfaces(registry, &compositor, &layer_shell, &wl.shm);
+	u32 layer_shell = 0;
+	wl_bind_interfaces(registry, &wl.compositor, &layer_shell, &wl.shm);
 
-	wl.surface = wl_compositor_create_surface(compositor);
+	wl.surface = wl_compositor_create_surface(wl.compositor);
 	wl.layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, wl.surface);
 
 	bufsock_flush(&wl.bs);
