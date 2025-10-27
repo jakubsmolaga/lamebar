@@ -1,6 +1,9 @@
 # lamebar
 hyper-minimalistic status bar for Wayland compositors
 
+## screenshots
+<img width="960" height="540" alt="image" src="https://github.com/user-attachments/assets/32340cdb-c1fe-42d7-900c-d760f1a70601" />
+
 ## quick start (hyprland)
 install from the AUR
 ```
