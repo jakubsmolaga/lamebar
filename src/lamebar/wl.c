@@ -21,7 +21,7 @@ static struct {
 	u32 scale;
 	// object ids
 	u32 display, surface, buffer, shm, shm_pool, layer_surface;
-} wl;
+} wl = {0};
 
 typedef struct { u32 obj; u16 opcode, size; } WL_Hdr;
 
@@ -265,7 +265,7 @@ wl_create_shared_memory(u32 size, int *out_fd)
 static void
 wl_grow_shared_memory(int fd, void *ptr, u64 old_size, u64 new_size)
 {
-	log_assert(old_size < new_size, "tried to grow shared memory to smaller size");
+	if (old_size >= new_size) return;
 
 	// make sure sizes are page-aligned
 	u64 page_size = sysconf(_SC_PAGESIZE);
@@ -354,20 +354,30 @@ wl_ensure_fb_size(u32 w, u32 h)
 	u64 old_size = wl.fb.w * wl.fb.h * sizeof(Pixel);
 	u64 new_size = w * h * sizeof(Pixel);
 	if (old_size >= new_size) return;
-	wl_buffer_destroy(wl.buffer);
-	wl_shm_pool_destroy(wl.shm_pool);
+
+	if (wl.buffer)
+		wl_buffer_destroy(wl.buffer);
+	if (wl.shm_pool)
+		wl_shm_pool_destroy(wl.shm_pool);
+
+	if (!wl.fb.data || !wl.shm_fd)
+		wl.fb.data = wl_create_shared_memory(new_size, &wl.shm_fd);
 	wl_grow_shared_memory(wl.shm_fd, wl.fb.data, old_size, new_size);
+
 	wl.fb.w = w;
 	wl.fb.h = h;
 	wl.shm_pool = wl_shm_create_pool(wl.shm, wl.shm_fd, new_size);
 
 	u32 stride = w * sizeof(Pixel);
-	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, w, h, stride, WL_FORMAT_ARGB8888);
+	u32 format = WL_FORMAT_ARGB8888;
+	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, w, h, stride, format);
 
+	u32 anchor = WL_ANCHOR_TOP | WL_ANCHOR_RIGHT;
 	zwlr_layer_surface_v1_set_size(wl.layer_surface, w, h);
-	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
+	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, anchor);
 	wl_surface_commit(wl.surface);
 	bufsock_flush(&wl.bs);
+
 	u32 serial = wl_wait_for_configure(wl.layer_surface);
 	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
 }
@@ -383,32 +393,13 @@ void wl_init(u32 scale) {
 
 	u32 registry = wl_display_get_registry();
 	bufsock_flush(&wl.bs);
+
 	u32 compositor = 0, layer_shell = 0;
 	wl_bind_interfaces(registry, &compositor, &layer_shell, &wl.shm);
 
 	wl.surface = wl_compositor_create_surface(compositor);
 	wl.layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, wl.surface);
-	// TODO: this should probably be parameterized somehow
-	u32 width = 100;
-	u32 height = 5;
-	zwlr_layer_surface_v1_set_size(wl.layer_surface, width * scale, height * scale);
-	zwlr_layer_surface_v1_set_anchor(wl.layer_surface, WL_ANCHOR_TOP | WL_ANCHOR_RIGHT);
-	wl_surface_commit(wl.surface);
-	bufsock_flush(&wl.bs);
-	u32 serial = wl_wait_for_configure(wl.layer_surface);
-	zwlr_layer_surface_v1_ack_configure(wl.layer_surface, serial);
 
-	wl.fb.w = width * scale;
-	wl.fb.h = height * scale;
-	u64 framebuf_size = wl.fb.w * wl.fb.h * sizeof(Pixel);
-	wl.fb.data = wl_create_shared_memory(framebuf_size, &wl.shm_fd);
-	memset(wl.fb.data, 0, framebuf_size);
-	wl.shm_pool = wl_shm_create_pool(wl.shm, wl.shm_fd, framebuf_size);
-	u32 stride = wl.fb.w * sizeof(Pixel);
-	wl.buffer = wl_shm_pool_create_buffer(wl.shm_pool, 0, wl.fb.w, wl.fb.h, stride, WL_FORMAT_ARGB8888);
-	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
-	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
-	wl_surface_commit(wl.surface);
 	bufsock_flush(&wl.bs);
 	wl_drain_events();
 }
