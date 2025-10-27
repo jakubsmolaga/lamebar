@@ -20,7 +20,7 @@ static struct {
 	PixelBuf fb;
 	u32 scale;
 	// object ids
-	u32 surface, buffer, shm, shm_pool, layer_surface;
+	u32 display, surface, buffer, shm, shm_pool, layer_surface;
 } wl;
 
 typedef struct { u32 obj; u16 opcode, size; } WL_Hdr;
@@ -38,6 +38,27 @@ enum {
 	WL_FORMAT_ARGB8888 = 0,
 	WL_FORMAT_XRGB8888 = 1,
 };
+
+// request opcodes
+static const u16 WL_DISPLAY_GET_REGISTRY = 1;
+static const u16 WL_REGISTRY_BIND = 0;
+static const u16 WL_COMPOSITOR_CREATE_SURFACE = 0;
+static const u16 ZWLR_LAYER_SHELL_V1_GET_LAYER_SURFACE = 0;
+static const u16 ZWLR_LAYER_SURFACE_V1_SET_SIZE = 0;
+static const u16 ZWLR_LAYER_SURFACE_V1_SET_ANCHOR = 1;
+static const u16 ZWLR_LAYER_SURFACE_V1_ACK_CONFIGURE = 6;
+static const u16 WL_SHM_CREATE_POOL = 0;
+static const u16 WL_SHM_POOL_CREATE_BUFFER = 0;
+static const u16 WL_SHM_POOL_DESTROY = 1;
+static const u16 WL_BUFFER_DESTROY = 0;
+static const u16 WL_SURFACE_COMMIT = 6;
+static const u16 WL_SURFACE_ATTACH = 1;
+static const u16 WL_SURFACE_DAMAGE_BUFFER = 9;
+
+// event opcodes
+static const u16 WL_DISPLAY_ERROR = 0;
+static const u16 WL_REGISTRY_GLOBAL = 0;
+static const u16 ZWLR_LAYER_SURFACE_V1_CONFIGURE = 0;
 
 /************************** message building helpers **************************/
 
@@ -75,7 +96,7 @@ static u32
 wl_display_get_registry(void)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(1, 1);
+	WL_Hdr *hdr = wl_msg_begin(wl.display, WL_DISPLAY_GET_REGISTRY);
 	wl_msg_push_u32(hdr, id);
 	return id;
 }
@@ -84,7 +105,7 @@ static u32
 wl_registry_bind(u32 self, u32 name, const char *iface, u32 version)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_REGISTRY_BIND);
 	wl_msg_push_u32(hdr, name);
 	wl_msg_push_str(hdr, iface);
 	wl_msg_push_u32(hdr, version);
@@ -96,7 +117,7 @@ static u32
 wl_compositor_create_surface(u32 self)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_COMPOSITOR_CREATE_SURFACE);
 	wl_msg_push_u32(hdr, id);
 	return id;
 }
@@ -105,7 +126,7 @@ static u32
 zwlr_layer_shell_v1_get_layer_surface(u32 self, u32 surface)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, ZWLR_LAYER_SHELL_V1_GET_LAYER_SURFACE);
 	wl_msg_push_u32(hdr, id);
 	wl_msg_push_u32(hdr, surface);
 	wl_msg_push_u32(hdr, 0); // output
@@ -117,7 +138,7 @@ zwlr_layer_shell_v1_get_layer_surface(u32 self, u32 surface)
 static void
 zwlr_layer_surface_v1_set_size(u32 self, u32 w, u32 h)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, ZWLR_LAYER_SURFACE_V1_SET_SIZE);
 	wl_msg_push_u32(hdr, w);
 	wl_msg_push_u32(hdr, h);
 }
@@ -125,14 +146,14 @@ zwlr_layer_surface_v1_set_size(u32 self, u32 w, u32 h)
 static void
 zwlr_layer_surface_v1_set_anchor(u32 self, WL_Anchor anchor)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	WL_Hdr *hdr = wl_msg_begin(self, ZWLR_LAYER_SURFACE_V1_SET_ANCHOR);
 	wl_msg_push_u32(hdr, anchor);
 }
 
 static void
 zwlr_layer_surface_v1_ack_configure(u32 self, u32 serial)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 6);
+	WL_Hdr *hdr = wl_msg_begin(self, ZWLR_LAYER_SURFACE_V1_ACK_CONFIGURE);
 	wl_msg_push_u32(hdr, serial);
 }
 
@@ -140,7 +161,7 @@ static u32
 wl_shm_create_pool(u32 self, int mem_fd, u32 size)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_SHM_CREATE_POOL);
 	wl_msg_push_u32(hdr, id);
 	wl_msg_push_u32(hdr, size);
 	bufsock_flush_with_fd(&wl.bs, mem_fd);
@@ -151,7 +172,7 @@ static u32
 wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_Format format)
 {
 	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_SHM_POOL_CREATE_BUFFER);
 	wl_msg_push_u32(hdr, id);
 	wl_msg_push_u32(hdr, offset);
 	wl_msg_push_u32(hdr, w);
@@ -164,25 +185,25 @@ wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_For
 static void
 wl_shm_pool_destroy(u32 self)
 {
-	wl_msg_begin(self, 1);
+	wl_msg_begin(self, WL_SHM_POOL_DESTROY);
 }
 
 static void
 wl_buffer_destroy(u32 self)
 {
-	wl_msg_begin(self, 0);
+	wl_msg_begin(self, WL_BUFFER_DESTROY);
 }
 
 static void
 wl_surface_commit(u32 self)
 {
-	wl_msg_begin(self, 6);
+	wl_msg_begin(self, WL_SURFACE_COMMIT);
 }
 
 static void
 wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_SURFACE_ATTACH);
 	wl_msg_push_u32(hdr, buffer);
 	wl_msg_push_u32(hdr, x);
 	wl_msg_push_u32(hdr, y);
@@ -191,7 +212,7 @@ wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
 static void
 wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
 {
-	WL_Hdr *hdr = wl_msg_begin(self, 9);
+	WL_Hdr *hdr = wl_msg_begin(self, WL_SURFACE_DAMAGE_BUFFER);
 	wl_msg_push_u32(hdr, x);
 	wl_msg_push_u32(hdr, y);
 	wl_msg_push_u32(hdr, w);
@@ -274,7 +295,7 @@ wl_drain_events(void)
 {
 	while (bufsock_has_data(&wl.bs)) {
 		WL_Hdr hdr = *(WL_Hdr*)bufsock_get(&wl.bs, sizeof(WL_Hdr));
-		if (hdr.obj != 1 || hdr.opcode != 0) {
+		if (hdr.obj != wl.display || hdr.opcode != WL_DISPLAY_ERROR) {
 			bufsock_get(&wl.bs, hdr.size - sizeof(hdr));
 			continue;
 		}
@@ -292,7 +313,7 @@ wl_bind_interfaces(u32 registry, u32 *compositor, u32 *layer_shell, u32 *shm)
 	bufsock_fill(&wl.bs);
 	while (bufsock_has_data(&wl.bs)) {
 		WL_Hdr hdr = *(WL_Hdr*)bufsock_get(&wl.bs, sizeof(WL_Hdr));
-		if (hdr.obj != registry || hdr.opcode != 0) {
+		if (hdr.obj != registry || hdr.opcode != WL_REGISTRY_GLOBAL) {
 			bufsock_get(&wl.bs, hdr.size - sizeof(hdr)); // skip
 			continue;
 		}
@@ -317,7 +338,7 @@ wl_wait_for_configure(u32 layer_surface)
 {
 	while (true) {
 		WL_Hdr hdr = *(WL_Hdr*)bufsock_get(&wl.bs, sizeof(WL_Hdr));
-		if (hdr.obj == layer_surface && hdr.opcode == 0) {
+		if (hdr.obj == layer_surface && hdr.opcode == ZWLR_LAYER_SURFACE_V1_CONFIGURE) {
 			u32 serial = *(u32*)bufsock_get(&wl.bs, sizeof(u32));
 			bufsock_get(&wl.bs, sizeof(u32)); // width
 			bufsock_get(&wl.bs, sizeof(u32)); // height
@@ -355,6 +376,7 @@ wl_ensure_fb_size(u32 w, u32 h)
 
 void wl_init(u32 scale) {
 	wl.scale = scale;
+	wl.display = 1;
 	wl.next_id = 2; // 0=NULL, 1=display
 
 	wl_connect();
