@@ -18,7 +18,7 @@ main(int argc, char *argv[])
 		return 0;
 	}
 	printf("starting daemon\n");
-	wl_init(4); // wl_init(args.scale);
+	wl_init();
 	ipc_init();
 	Arena arena = arena_create();
 	while (1) {
@@ -31,7 +31,7 @@ main(int argc, char *argv[])
 		}
 		case IPC_CMD_SHOW: {
 			PixelBuf pixels = next_frame(&arena);
-			wl_show(pixels);
+			wl_show(pixels, args.scale);
 			break;
 		}
 		default: {

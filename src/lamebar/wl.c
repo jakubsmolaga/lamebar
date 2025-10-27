@@ -18,7 +18,6 @@ static struct {
 	BufSock bs;
 	int shm_fd;
 	PixelBuf fb;
-	u32 scale;
 	// object ids
 	u32 display, surface, buffer, shm, shm_pool, layer_surface;
 } wl = {0};
@@ -384,8 +383,7 @@ wl_ensure_fb_size(u32 w, u32 h)
 
 /********************************* public api *********************************/
 
-void wl_init(u32 scale) {
-	wl.scale = scale;
+void wl_init(void) {
 	wl.display = 1;
 	wl.next_id = 2; // 0=NULL, 1=display
 
@@ -413,14 +411,14 @@ void wl_hide(void) {
 }
 
 void
-wl_show(PixelBuf pixels)
+wl_show(PixelBuf pixels, u32 scale)
 {
-	wl_ensure_fb_size(pixels.w * wl.scale, pixels.h * wl.scale);
+	wl_ensure_fb_size(pixels.w * scale, pixels.h * scale);
 	log_assert(pixels.w <= wl.fb.w && pixels.h <= wl.fb.h, "frame is too large for the framebuffer");
 	bufsock_flush(&wl.bs);
 	wl_drain_events();
 	memset(wl.fb.data, 0, wl.fb.w * wl.fb.h * sizeof(Pixel));
-	pixelbuf_copy(wl.fb, pixels, wl.fb.w - pixels.w * wl.scale, 0, wl.scale);
+	pixelbuf_copy(wl.fb, pixels, wl.fb.w - pixels.w * scale, 0, scale);
 	wl_surface_attach(wl.surface, wl.buffer, 0, 0);
 	wl_surface_damage_buffer(wl.surface, 0, 0, wl.fb.w, wl.fb.h);
 	wl_surface_commit(wl.surface);
