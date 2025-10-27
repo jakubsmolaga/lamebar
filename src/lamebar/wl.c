@@ -26,23 +26,21 @@ static struct {
 
 typedef struct { u32 obj; u16 opcode, size; } WL_Hdr;
 
-static void
-wl_connect(void)
-{
-	char *filename = getenv("WAYLAND_DISPLAY");
-	if (!filename) filename = "wayland-0";
-	char *dirname = getenv("XDG_RUNTIME_DIR");
-	log_assert(dirname, "XDG_RUNTIME_DIR not set");
-	struct sockaddr_un addr = { .sun_family = AF_UNIX };
-	addr.sun_path[0] = '\0';
-	strcat(addr.sun_path, dirname);
-	strcat(addr.sun_path, "/");
-	strcat(addr.sun_path, filename);
-	wl.fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	int ret = connect(wl.fd, (void*)&addr, sizeof(addr));
-	log_assert(ret >= 0, "failed to connect to wayland socket");
-	wl.bs = bufsock_create(wl.fd);
-}
+typedef u32 WL_Anchor;
+enum {
+	WL_ANCHOR_TOP = (1 << 0),
+	WL_ANCHOR_BOTTOM = (1 << 1),
+	WL_ANCHOR_LEFT = (1 << 2),
+	WL_ANCHOR_RIGHT = (1 << 3),
+};
+
+typedef u32 WL_Format;
+enum {
+	WL_FORMAT_ARGB8888 = 0,
+	WL_FORMAT_XRGB8888 = 1,
+};
+
+/************************** message building helpers **************************/
 
 static WL_Hdr*
 wl_msg_begin(u32 obj, u16 opcode) {
@@ -70,6 +68,155 @@ wl_msg_push_str(WL_Hdr *hdr, const char *str)
 	u64 len = strlen(str) + 1;
 	wl_msg_push_u32(hdr, len);
 	wl_msg_push(hdr, str, align_up(len, 4));
+}
+
+/***************************** protocol messages ******************************/
+
+static u32
+wl_display_get_registry(void)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(1, 1);
+	wl_msg_push_u32(hdr, id);
+	return id;
+}
+
+static u32
+wl_registry_bind(u32 self, u32 name, const char *iface, u32 version)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, name);
+	wl_msg_push_str(hdr, iface);
+	wl_msg_push_u32(hdr, version);
+	wl_msg_push_u32(hdr, id);
+	return id;
+}
+
+static u32
+wl_compositor_create_surface(u32 self)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, id);
+	return id;
+}
+
+static u32
+zwlr_layer_shell_v1_get_layer_surface(u32 self, u32 surface)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, id);
+	wl_msg_push_u32(hdr, surface);
+	wl_msg_push_u32(hdr, 0); // output
+	wl_msg_push_u32(hdr, 3); // layer=overlay
+	wl_msg_push_str(hdr, "lamebar");
+	return id;
+}
+
+static void
+zwlr_layer_surface_v1_set_size(u32 self, u32 w, u32 h)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, w);
+	wl_msg_push_u32(hdr, h);
+}
+
+static void
+zwlr_layer_surface_v1_set_anchor(u32 self, WL_Anchor anchor)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	wl_msg_push_u32(hdr, anchor);
+}
+
+static void
+zwlr_layer_surface_v1_ack_configure(u32 self, u32 serial)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 6);
+	wl_msg_push_u32(hdr, serial);
+}
+
+static u32
+wl_shm_create_pool(u32 self, int mem_fd, u32 size)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, id);
+	wl_msg_push_u32(hdr, size);
+	bufsock_flush_with_fd(&wl.bs, mem_fd);
+	return id;
+}
+
+static u32
+wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_Format format)
+{
+	u32 id = wl.next_id++;
+	WL_Hdr *hdr = wl_msg_begin(self, 0);
+	wl_msg_push_u32(hdr, id);
+	wl_msg_push_u32(hdr, offset);
+	wl_msg_push_u32(hdr, w);
+	wl_msg_push_u32(hdr, h);
+	wl_msg_push_u32(hdr, stride);
+	wl_msg_push_u32(hdr, format);
+	return id;
+}
+
+static void
+wl_shm_pool_destroy(u32 self)
+{
+	wl_msg_begin(self, 1);
+}
+
+static void
+wl_buffer_destroy(u32 self)
+{
+	wl_msg_begin(self, 0);
+}
+
+static void
+wl_surface_commit(u32 self)
+{
+	wl_msg_begin(self, 6);
+}
+
+static void
+wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 1);
+	wl_msg_push_u32(hdr, buffer);
+	wl_msg_push_u32(hdr, x);
+	wl_msg_push_u32(hdr, y);
+}
+
+static void
+wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
+{
+	WL_Hdr *hdr = wl_msg_begin(self, 9);
+	wl_msg_push_u32(hdr, x);
+	wl_msg_push_u32(hdr, y);
+	wl_msg_push_u32(hdr, w);
+	wl_msg_push_u32(hdr, h);
+}
+
+/******************************** misc helpers ********************************/
+
+static void
+wl_connect(void)
+{
+	char *filename = getenv("WAYLAND_DISPLAY");
+	if (!filename) filename = "wayland-0";
+	char *dirname = getenv("XDG_RUNTIME_DIR");
+	log_assert(dirname, "XDG_RUNTIME_DIR not set");
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	addr.sun_path[0] = '\0';
+	strcat(addr.sun_path, dirname);
+	strcat(addr.sun_path, "/");
+	strcat(addr.sun_path, filename);
+	wl.fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	int ret = connect(wl.fd, (void*)&addr, sizeof(addr));
+	log_assert(ret >= 0, "failed to connect to wayland socket");
+	wl.bs = bufsock_create(wl.fd);
 }
 
 static void*
@@ -139,151 +286,6 @@ wl_drain_events(void)
 		log_crash("wayland error (%d) (obj=%d): %s", errcode, obj_id, msg);
 	}
 }
-
-/***************************** protocol messages ******************************/
-
-static u32
-wl_display_get_registry(void)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(1, 1);
-	wl_msg_push_u32(hdr, id);
-	return id;
-}
-
-static u32
-wl_registry_bind(u32 self, u32 name, const char *iface, u32 version)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, name);
-	wl_msg_push_str(hdr, iface);
-	wl_msg_push_u32(hdr, version);
-	wl_msg_push_u32(hdr, id);
-	return id;
-}
-
-static u32
-wl_compositor_create_surface(u32 self)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, id);
-	return id;
-}
-
-static u32
-zwlr_layer_shell_v1_get_layer_surface(u32 self, u32 surface)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, id);
-	wl_msg_push_u32(hdr, surface);
-	wl_msg_push_u32(hdr, 0); // output
-	wl_msg_push_u32(hdr, 3); // layer=overlay
-	wl_msg_push_str(hdr, "lamebar");
-	return id;
-}
-
-static void
-zwlr_layer_surface_v1_set_size(u32 self, u32 w, u32 h)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-}
-
-typedef u32 WL_Anchor;
-enum {
-	WL_ANCHOR_TOP = (1 << 0),
-	WL_ANCHOR_BOTTOM = (1 << 1),
-	WL_ANCHOR_LEFT = (1 << 2),
-	WL_ANCHOR_RIGHT = (1 << 3),
-};
-
-static void
-zwlr_layer_surface_v1_set_anchor(u32 self, WL_Anchor anchor)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
-	wl_msg_push_u32(hdr, anchor);
-}
-
-static void
-zwlr_layer_surface_v1_ack_configure(u32 self, u32 serial)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 6);
-	wl_msg_push_u32(hdr, serial);
-}
-
-static u32
-wl_shm_create_pool(u32 self, int mem_fd, u32 size)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, id);
-	wl_msg_push_u32(hdr, size);
-	bufsock_flush_with_fd(&wl.bs, mem_fd);
-	return id;
-}
-
-typedef u32 WL_Format;
-enum {
-	WL_FORMAT_ARGB8888 = 0,
-	WL_FORMAT_XRGB8888 = 1,
-};
-
-static u32
-wl_shm_pool_create_buffer(u32 self, u32 offset, u32 w, u32 h, u32 stride, WL_Format format)
-{
-	u32 id = wl.next_id++;
-	WL_Hdr *hdr = wl_msg_begin(self, 0);
-	wl_msg_push_u32(hdr, id);
-	wl_msg_push_u32(hdr, offset);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-	wl_msg_push_u32(hdr, stride);
-	wl_msg_push_u32(hdr, format);
-	return id;
-}
-
-static void
-wl_shm_pool_destroy(u32 self)
-{
-	wl_msg_begin(self, 1);
-}
-
-static void
-wl_buffer_destroy(u32 self)
-{
-	wl_msg_begin(self, 0);
-}
-
-static void
-wl_surface_commit(u32 self)
-{
-	wl_msg_begin(self, 6);
-}
-
-static void
-wl_surface_attach(u32 self, u32 buffer, u32 x, u32 y)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 1);
-	wl_msg_push_u32(hdr, buffer);
-	wl_msg_push_u32(hdr, x);
-	wl_msg_push_u32(hdr, y);
-}
-
-static void
-wl_surface_damage_buffer(u32 self, u32 x, u32 y, u32 w, u32 h)
-{
-	WL_Hdr *hdr = wl_msg_begin(self, 9);
-	wl_msg_push_u32(hdr, x);
-	wl_msg_push_u32(hdr, y);
-	wl_msg_push_u32(hdr, w);
-	wl_msg_push_u32(hdr, h);
-}
-
-/******************************************************************************/
 
 static void
 wl_bind_interfaces(u32 registry, u32 *compositor, u32 *layer_shell, u32 *shm)
