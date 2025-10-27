@@ -14,7 +14,6 @@
 #include "bufsock.h"
 
 static struct {
-	int fd;
 	u32 next_id;
 	BufSock bs;
 	int shm_fd;
@@ -213,10 +212,10 @@ wl_connect(void)
 	strcat(addr.sun_path, dirname);
 	strcat(addr.sun_path, "/");
 	strcat(addr.sun_path, filename);
-	wl.fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	int ret = connect(wl.fd, (void*)&addr, sizeof(addr));
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	int ret = connect(fd, (void*)&addr, sizeof(addr));
 	log_assert(ret >= 0, "failed to connect to wayland socket");
-	wl.bs = bufsock_create(wl.fd);
+	wl.bs = bufsock_create(fd);
 }
 
 static void*
